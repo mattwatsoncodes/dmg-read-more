@@ -1,0 +1,44 @@
+{
+	"extends": [
+		"@wordpress/stylelint-config",
+		"stylelint-scss"
+	],
+	"rules": {
+		"no-descending-specificity": null,
+		"no-empty-source": null,
+		"no-invalid-double-slash-comments": null,
+		"property-no-unknown": [
+			true,
+			{
+				"ignoreProperties": [
+					"////",
+					"/^composes/"
+				]
+			}
+		],
+		"rule-empty-line-before": [
+			"always",
+			{
+				"ignore": [
+					"after-comment",
+					"first-nested"
+				]
+			}
+		],
+		"selector-class-pattern": null,
+		"selector-pseudo-class-no-unknown": [
+			true,
+			{
+				"ignorePseudoClasses": [
+					"global"
+				]
+			}
+		],
+		"at-rule-no-unknown": null
+	},
+	"ignoreFiles": [
+		"**/build/**",
+		"**/node_modules/**",
+		"**/vendor/**"
+	]
+}

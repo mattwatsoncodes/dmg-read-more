@@ -1,0 +1,132 @@
+name: Sync and Build Plugin
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      # 1. Checkout the dev repository (dmg-read-more-dev) from its main branch.
+      - name: Checkout dev repository
+        uses: actions/checkout@v2
+        with:
+          repository: mattwatsoncodes/dmg-read-more-dev
+          fetch-depth: 0
+          ref: main
+
+      # 2. Set up Node.js (v18) and PHP (7.4).
+      - name: Setup Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: '18'
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '7.4'
+
+      # 3. Define release variables for commit messages and PR titles.
+      - name: Define release variables
+        id: release_vars
+        run: |
+          VERSION="0.2.1"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          VERSION_NO_V="${VERSION#v}"
+          echo "VERSION_NO_V=$VERSION_NO_V" >> $GITHUB_ENV
+          TITLE="Release $VERSION"
+          BODY="Automated release build."
+          echo "TITLE<<EOF" >> $GITHUB_ENV
+          echo "$TITLE" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+          echo "BODY<<EOF" >> $GITHUB_ENV
+          echo "$BODY" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      # 4. Clone the target repository (dmg-read-more) into a subdirectory.
+      - name: Clone target repository
+        run: |
+          git clone https://x-access-token:${{ secrets.RELEASE_REPO_TOKEN }}@github.com/mattwatsoncodes/dmg-read-more.git target_repo
+
+      # 5. Create a new branch in the target repository.
+      - name: Create update branch in target repository
+        run: |
+          cd target_repo
+          DEFAULT_BRANCH=$(git remote show origin | awk '/HEAD branch/ {print $NF}')
+          DEFAULT_BRANCH=${DEFAULT_BRANCH:-"main"}
+          echo "Default branch detected: $DEFAULT_BRANCH"
+          git checkout -b update-from-dev origin/$DEFAULT_BRANCH || git checkout -b update-from-dev
+
+      # 6. Add the dev repository as a remote in the target repository and fetch its main branch.
+      - name: Add dev remote and fetch history
+        run: |
+          cd target_repo
+          git remote add dev_repo ../
+          git fetch dev_repo main
+
+      # 7. Import the dev repository using git subtree (preserving full history).
+      - name: Import dev repository via subtree
+        run: |
+          cd target_repo
+          # Set Git identity to avoid empty ident errors.
+          git config user.email "matt@mattwatson.codes"
+          git config user.name "Matt Watson"
+          # Import the main branch from dev_repo into a temporary folder "dev_files".
+          git subtree add --prefix=dev_files dev_repo main
+
+      # 8. Move the imported files from the temporary folder to the repository root and remove the folder.
+      - name: Move imported files to root
+        run: |
+          cd target_repo
+          rsync -av --remove-source-files dev_files/ .
+          rm -rf dev_files
+
+      # 9. Build assets in the target repository (dependencies must be available).
+      - name: Build assets in target repository
+        run: |
+          cd target_repo
+          composer install --no-dev || { echo "Composer installation failed"; exit 1; }
+          npm install || { echo "npm install failed"; exit 1; }
+          npm run build || { echo "npm run build failed"; exit 1; }
+          if [ ! -d "build" ]; then
+            echo "Error: Build folder does not exist!"
+            exit 1
+          fi
+          echo "Assets built successfully."
+
+      # 10. Remove unwanted files from the target repository.
+      - name: Remove unwanted files
+        run: |
+          cd target_repo
+          rm -rf README.md .github stubs .editorconfig .eslintrc.js .stylelintrc.json composer.json composer.lock package-lock.json package.json phpcs.xml.dist phpstan.neon webpack.config.js node_modules vendor .gitignore
+          # Recursively remove any remaining .stylelintrc.json files anywhere in the repository
+          find . -type f -name ".stylelintrc.json" -delete
+          echo "Unwanted files removed."
+
+      # 11. Commit and push the changes to the target repository.
+      - name: Commit changes in target repository
+        run: |
+          cd target_repo
+          git config user.email "matt@mattwatson.codes"
+          git config user.name "Matt Watson"
+          git add .
+          git commit -m "Import dev repository (with full history) and build assets for release $VERSION"
+          git push --force origin update-from-dev
+
+      # 12. Create a pull request in the target repository.
+      - name: Create PR in target repository
+        uses: peter-evans/create-pull-request@v4
+        with:
+          token: ${{ secrets.RELEASE_REPO_TOKEN }}
+          repository: mattwatsoncodes/dmg-read-more
+          base: main
+          title: "Sync from dmg-read-more-dev"
+          body: "This PR imports the dev repository (main branch) with full commit history, builds assets, and removes unwanted files."
+          branch: update-from-dev
+
+      # 13. Output a success message.
+      - name: Complete process
+        run: echo "✅ Sync and build process completed successfully. A PR has been created in dmg-read-more."
